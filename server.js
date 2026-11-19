@@ -640,7 +640,7 @@ app.get('/api/local/search', async (req, res) => {
     `;
     console.log('Trying Overpass search');
     const overpassResponse = await fetch(
-      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
       {
         method: 'POST',
         headers: {
