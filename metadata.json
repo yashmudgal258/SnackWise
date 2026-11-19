@@ -1,0 +1,5 @@
+{
+  "name": "SnackWise",
+  "description": "Understand your food. Choose with confidence. Snack discovery, barcode lookup, label comparison, and picnic planner.",
+  "requestFramePermissions": ["camera"]
+}
