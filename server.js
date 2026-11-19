@@ -508,28 +508,7 @@ app.get('/api/local/search', async (req, res) => {
         const rev = await revRes.json();
         const ad = rev.address || {};
         resolvedLabel = [ad.suburb || ad.neighbourhood || ad.city || ad.town, ad.postcode, ad.state].filter(Boolean).join(', ') || rev.display_name || `${centerLat.toFixed(3)}, ${centerLon.toFixed(3)}`;
-      }
-    } else {
-      const qGeo = /\bindia\b/i.test(rawLoc) ? rawLoc : `${rawLoc}, India`;
-      const geoUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=${encodeURIComponent(qGeo)}`;
-      const geoRes = await fetch(geoUrl, { headers: OSM_HEADERS, signal: AbortSignal.timeout(7000) });
-      if (!geoRes.ok) throw new Error('GEO_STATUS_' + geoRes.status);
-      const geoList = await geoRes.json();
-      if (!Array.isArray(geoList) || !geoList.length) {
-        return res.json({
-          resolvedLocation: rawLoc,
-          source: 'OpenStreetMap Nominatim',
-          places: [],
-          message: 'Could not resolve that city, locality or PIN code in OpenStreetMap. Try an area name like "Gurugram", "122002", "South Delhi", or "Noida".',
-        });
-      }
-      centerLat = Number(geoList[0].lat);
-      centerLon = Number(geoList[0].lon);
-      const ad = geoList[0].address || {};
-      resolvedLabel = [ad.suburb || ad.neighbourhood, ad.city || ad.town || ad.village || ad.state_district, ad.postcode, ad.state].filter(Boolean).join(', ') || geoList[0].display_name;
-    }
-
-    
+      }    
 } else {
   const qGeo = /\bindia\b/i.test(rawLoc)
     ? rawLoc
