@@ -744,11 +744,13 @@ app.get('/api/local/search', async (req, res) => {
     LOCAL_CACHE.set(cacheKey, { ts: Date.now(), payload });
     return res.json(payload);
   } catch (err) {
-    return res.status(502).json({
-      error: 'Could not reach live OpenStreetMap location lookup right now. You can still browse or add community local listings saved in this browser.',
-      places: [],
-    });
-  }
+  console.error('LOCAL SEARCH ERROR:', err);
+
+  return res.status(502).json({
+    error: String(err.message || err),
+    places: [],
+  });
+}
 });
 
 app.use(express.static(__dirname));
