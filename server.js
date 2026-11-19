@@ -595,11 +595,146 @@ app.get('/api/local/search', async (req, res) => {
       }
     }
 
+    // Search nearby food-related places using OpenStreetMap Overpass
+    const radius = 6000;
+
+    const shopTypes = {
+      all: ['health_food', 'organic', 'bakery', 'supermarket', 'convenience', 'greengrocer', 'farm', 'food'],
+      'health-organic': ['health_food', 'organic'],
+      'millet-grain': ['health_food', 'organic', 'supermarket', 'greengrocer', 'farm'],
+      bakery: ['bakery'],
+      cafe: [],
+      'produce-grocery': ['supermarket', 'convenience', 'greengrocer', 'farm', 'food'],
+    };
+
+    const amenityTypes = {
+      all: ['cafe', 'restaurant', 'fast_food', 'food_court'],
+      'health-organic': [],
+      'millet-grain': [],
+      bakery: [],
+      cafe: ['cafe', 'restaurant', 'fast_food', 'food_court'],
+      'produce-grocery': [],
+    };
+
+    const selectedShops = shopTypes[type] || shopTypes.all;
+    const selectedAmenities = amenityTypes[type] || amenityTypes.all;
+
+    const clauses = [];
+
+    if (selectedShops.length) {
+      clauses.push(
+        `nwr(around:${radius},${centerLat},${centerLon})["shop"~"^(${selectedShops.join('|')})$"];`
+      );
+    }
+
+    if (selectedAmenities.length) {
+      clauses.push(
+        `nwr(around:${radius},${centerLat},${centerLon})["amenity"~"^(${selectedAmenities.join('|')})$"];`
+      );
+    }
+
+    const overpassQuery = `
+      [out:json][timeout:20];
+      (
+        ${clauses.join('\n')}
+      );
+      out center;
+    `;
+
+    const overpassResponse = await fetch(
+      'https://overpass-api.de/api/interpreter',
+      {
+        method: 'POST',
+        headers: {
+          ...OSM_HEADERS,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `data=${encodeURIComponent(overpassQuery)}`,
+        signal: AbortSignal.timeout(25000),
+      }
+    );
+
+    if (!overpassResponse.ok) {
+      throw new Error(`OVERPASS_STATUS_${overpassResponse.status}`);
+    }
+
+    const overpassData = await overpassResponse.json();
+    const elements = Array.isArray(overpassData.elements)
+      ? overpassData.elements
+      : [];
+
+    const seen = new Set();
+    const places = [];
+
+    for (const element of elements) {
+      const tags = element.tags || {};
+      const name = String(tags.name || tags.brand || '').trim();
+
+      if (!name) continue;
+
+      const key = `${element.type}:${element.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const pLat = Number(element.lat ?? element.center?.lat);
+      const pLon = Number(element.lon ?? element.center?.lon);
+
+      if (!Number.isFinite(pLat) || !Number.isFinite(pLon)) continue;
+
+      const p = {
+        name,
+        type: tags.shop || tags.amenity || '',
+        category: tags.amenity ? 'amenity' : 'shop',
+        extratags: {
+          ...tags,
+          organic: tags.shop === 'organic' ? 'yes' : tags.organic,
+        },
+        display_name: name,
+        address: {
+          house_number: tags['addr:housenumber'],
+          road: tags['addr:street'],
+          neighbourhood: tags['addr:neighbourhood'],
+          suburb: tags['addr:suburb'],
+          city: tags['addr:city'] || tags['addr:town'],
+          state: tags['addr:state'],
+          postcode: tags['addr:postcode'],
+        },
+      };
+
+      const cls = classifyOsmPlace(p);
+      const dietTags = [];
+
+      if (tags.organic === 'yes' || tags.shop === 'organic') {
+        dietTags.push('Organic tagged');
+      }
+      if (tags['diet:vegetarian'] === 'yes') dietTags.push('Vegetarian tagged');
+      if (tags['diet:vegan'] === 'yes') dietTags.push('Vegan tagged');
+      if (tags['diet:gluten_free'] === 'yes') dietTags.push('Gluten-free tagged');
+
+      places.push({
+        id: key,
+        name,
+        address: formatOsmAddress(p),
+        lat: pLat,
+        lon: pLon,
+        distanceKm: haversineKm(centerLat, centerLon, pLat, pLon),
+        categoryKey: cls.catKey,
+        categoryLabel: cls.catLabel,
+        phone: tags.phone || tags['contact:phone'] || '',
+        website: tags.website || tags['contact:website'] || '',
+        openingHours: tags.opening_hours || '',
+        dietTags,
+        source: 'OpenStreetMap (community-mapped)',
+        verified: false,
+        osmUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+      });
+    }
+
     places.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
     const payload = {
       resolvedLocation: resolvedLabel,
       center: { lat: centerLat, lon: centerLon },
-      source: 'OpenStreetMap Nominatim (live directory)',
+      source: 'OpenStreetMap Overpass (live directory)',
       places: places.slice(0, 20),
     };
     if (LOCAL_CACHE.size >= 40) {
