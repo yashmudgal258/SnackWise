@@ -529,71 +529,7 @@ app.get('/api/local/search', async (req, res) => {
       resolvedLabel = [ad.suburb || ad.neighbourhood, ad.city || ad.town || ad.village || ad.state_district, ad.postcode, ad.state].filter(Boolean).join(', ') || geoList[0].display_name;
     }
 
-    const delta = 0.06; // ~6 km radius box
-    const viewbox = `${centerLon - delta},${centerLat + delta},${centerLon + delta},${centerLat - delta}`;
-    const termMap = {
-      all: ['organic', 'bakery', 'supermarket', 'cafe'],
-      'health-organic': ['organic', 'health food', 'ayurvedic', 'millet'],
-      'millet-grain': ['organic', 'grocery', 'supermarket'],
-      bakery: ['bakery'],
-      cafe: ['cafe', 'juice'],
-      'produce-grocery': ['fruits', 'supermarket', 'greengrocer'],
-    };
-    const queries = termMap[type] || termMap.all;
-    const NON_FOOD_TYPES = new Set(['dry_cleaning', 'laundry', 'bank', 'atm', 'fuel', 'car_repair', 'beauty', 'hairdresser', 'clothes', 'shoes', 'electronics', 'mobile_phone', 'real_estate', 'hospital', 'clinic', 'pharmacy']);
-
-    const seen = new Set();
-    const places = [];
-
-    const settled = await Promise.allSettled(
-      queries.map(async (term) => {
-        const searchUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&extratags=1&countrycodes=in&limit=8&bounded=1&viewbox=${viewbox}&q=${encodeURIComponent(term)}`;
-        const r = await fetch(searchUrl, { headers: OSM_HEADERS, signal: AbortSignal.timeout(7000) });
-        if (!r.ok) return [];
-        const list = await r.json();
-        return Array.isArray(list) ? list : [];
-      }),
-    );
-
-    for (const s of settled) {
-      if (s.status !== 'fulfilled') continue;
-      for (const p of s.value) {
-        const key = `${p.osm_type}:${p.osm_id}`;
-        if (seen.has(key)) continue;
-        const name = String(p.name || '').trim();
-        if (!name) continue;
-        const osmType = String(p.type || '').toLowerCase();
-        if (NON_FOOD_TYPES.has(osmType) || /dry\s*clean|laundry|salon|bank|atm\b/i.test(name)) continue;
-        seen.add(key);
-        const tags = p.extratags || {};
-        const cls = classifyOsmPlace(p);
-        const pLat = Number(p.lat);
-        const pLon = Number(p.lon);
-        const dietTags = [];
-        if (tags.organic === 'yes') dietTags.push('Organic tagged');
-        if (tags['diet:vegetarian'] === 'yes') dietTags.push('Vegetarian tagged');
-        if (tags['diet:vegan'] === 'yes') dietTags.push('Vegan tagged');
-        if (tags['diet:gluten_free'] === 'yes') dietTags.push('Gluten-free tagged');
-
-        places.push({
-          id: key,
-          name,
-          address: formatOsmAddress(p),
-          lat: pLat,
-          lon: pLon,
-          distanceKm: Number.isFinite(pLat) && Number.isFinite(pLon) ? haversineKm(centerLat, centerLon, pLat, pLon) : null,
-          categoryKey: cls.catKey,
-          categoryLabel: cls.catLabel,
-          phone: tags.phone || tags['contact:phone'] || tags.mobile || '',
-          website: tags.website || tags['contact:website'] || tags['website:menu'] || '',
-          openingHours: tags.opening_hours || '',
-          dietTags,
-          source: 'OpenStreetMap (community-mapped)',
-          verified: false,
-          osmUrl: `https://www.openstreetmap.org/${p.osm_type}/${p.osm_id}`,
-        });
-      }
-    }
+    
 
     // Search nearby food-related places using OpenStreetMap Overpass
     const radius = 6000;
