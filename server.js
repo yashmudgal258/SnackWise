@@ -519,7 +519,7 @@ app.get('/api/local/search', async (req, res) => {
   // First try Nominatim
   try {
     const geoUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=${encodeURIComponent(qGeo)}`;
-
+    console.log('Trying Nominatim geocoding');
     const geoRes = await fetch(geoUrl, {
       headers: OSM_HEADERS,
       signal: AbortSignal.timeout(7000),
@@ -544,7 +544,7 @@ app.get('/api/local/search', async (req, res) => {
   if (!geoResult) {
     const photonUrl =
       `https://photon.komoot.io/api/?limit=1&lang=en&q=${encodeURIComponent(qGeo)}`;
-
+     console.log('Trying Photon geocoding');
     const photonRes = await fetch(photonUrl, {
       headers: {
         'User-Agent': 'SnackWise/1.0',
@@ -638,7 +638,7 @@ app.get('/api/local/search', async (req, res) => {
       );
       out center;
     `;
-
+    console.log('Trying Overpass search');
     const overpassResponse = await fetch(
       'https://overpass-api.de/api/interpreter',
       {
