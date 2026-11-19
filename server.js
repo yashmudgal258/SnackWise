@@ -530,6 +530,89 @@ app.get('/api/local/search', async (req, res) => {
     }
 
     
+} else {
+  const qGeo = /\bindia\b/i.test(rawLoc)
+    ? rawLoc
+    : `${rawLoc}, India`;
+
+  let geoResult = null;
+
+  // First try Nominatim
+  try {
+    const geoUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=${encodeURIComponent(qGeo)}`;
+
+    const geoRes = await fetch(geoUrl, {
+      headers: OSM_HEADERS,
+      signal: AbortSignal.timeout(7000),
+    });
+
+    if (geoRes.ok) {
+      const geoList = await geoRes.json();
+
+      if (Array.isArray(geoList) && geoList.length) {
+        geoResult = {
+          lat: Number(geoList[0].lat),
+          lon: Number(geoList[0].lon),
+          address: geoList[0].address || {},
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Nominatim lookup failed:', err.message);
+  }
+
+  // If Nominatim fails or is rate-limited, use Photon
+  if (!geoResult) {
+    const photonUrl =
+      `https://photon.komoot.io/api/?limit=1&lang=en&q=${encodeURIComponent(qGeo)}`;
+
+    const photonRes = await fetch(photonUrl, {
+      headers: {
+        'User-Agent': 'SnackWise/1.0',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!photonRes.ok) {
+      throw new Error(`PHOTON_STATUS_${photonRes.status}`);
+    }
+
+    const photonData = await photonRes.json();
+    const feature = photonData.features?.[0];
+
+    if (!feature) {
+      throw new Error('LOCATION_NOT_FOUND');
+    }
+
+    const coordinates = feature.geometry?.coordinates || [];
+
+    geoResult = {
+      lon: Number(coordinates[0]),
+      lat: Number(coordinates[1]),
+      address: feature.properties || {},
+    };
+  }
+
+  centerLat = geoResult.lat;
+  centerLon = geoResult.lon;
+
+  if (
+    !Number.isFinite(centerLat) ||
+    !Number.isFinite(centerLon)
+  ) {
+    throw new Error('INVALID_GEOCODE_COORDINATES');
+  }
+
+  const ad = geoResult.address;
+
+  resolvedLabel = [
+    ad.name,
+    ad.suburb || ad.neighbourhood || ad.district,
+    ad.city || ad.town || ad.county,
+    ad.state,
+  ].filter(Boolean).join(', ') || rawLoc;
+}
+
 
     // Search nearby food-related places using OpenStreetMap Overpass
     const radius = 6000;
