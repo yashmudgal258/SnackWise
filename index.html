@@ -1025,24 +1025,23 @@ window.searchLocal=async(useGeo)=>{
     LF.lat=centerLat;
     LF.lon=centerLon;
 
-    const shopTypes={
-      all:['health_food','organic','bakery','supermarket','convenience','greengrocer','farm','food'],
-      'health-organic':['health_food','organic'],
-      'millet-grain':['health_food','organic','supermarket','greengrocer','farm'],
-      bakery:['bakery'],
-      cafe:[],
-      'produce-grocery':['supermarket','convenience','greengrocer','farm','food']
-    };
+   const shopTypes={
+  all:['health_food','organic','greengrocer','farm'],
+  'health-organic':['health_food','organic'],
+  'millet-grain':['health_food','organic','greengrocer','farm'],
+  bakery:['bakery'],
+  cafe:[],
+  'produce-grocery':['supermarket','greengrocer','farm','food']
+};
 
-    const amenityTypes={
-      all:['cafe','restaurant','fast_food','food_court'],
-      'health-organic':[],
-      'millet-grain':[],
-      bakery:[],
-      cafe:['cafe','restaurant','fast_food','food_court'],
-      'produce-grocery':[]
-    };
-
+const amenityTypes={
+  all:[],
+  'health-organic':[],
+  'millet-grain':[],
+  bakery:[],
+  cafe:['cafe','restaurant','fast_food','food_court'],
+  'produce-grocery':[]
+};
     const shops=shopTypes[LF.type]||shopTypes.all;
     const amenities=amenityTypes[LF.type]||amenityTypes.all;
 
