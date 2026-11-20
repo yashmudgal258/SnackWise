@@ -968,27 +968,202 @@ window.useMyLocation=()=>{
     toast('Location not shared');
   },{timeout:8000});
 };
+
 window.searchLocal=async(useGeo)=>{
-  const out=$('#localOut'),st=$('#locStatus');if(!out)return;
+  const out=$('#localOut'),st=$('#locStatus');
+  if(!out)return;
+
   LF.type=$('#lType')?.value||'all';
-  if(!useGeo){LF.lat=null;LF.lon=null;LF.loc=($('#lLoc')?.value||'Gurugram, 122002').trim()||'Gurugram, 122002'}
-  if(st)st.textContent=useGeo?'Searching OpenStreetMap near your shared coordinates…':`Searching OpenStreetMap around “${LF.loc}”…`;
-  out.innerHTML=empty('Searching nearby places in OpenStreetMap…');
+
+  if(!useGeo){
+    LF.lat=null;
+    LF.lon=null;
+    LF.loc=($('#lLoc')?.value||'Gurugram, 122002').trim()||'Gurugram, 122002';
+  }
+
+  if(st)st.textContent='Searching nearby food places…';
+  out.innerHTML=empty('Searching nearby places…');
+
   try{
-    const qs=useGeo&&LF.lat!=null&&LF.lon!=null
-      ?`lat=${encodeURIComponent(LF.lat)}&lon=${encodeURIComponent(LF.lon)}&type=${encodeURIComponent(LF.type)}`
-      :`loc=${encodeURIComponent(LF.loc)}&type=${encodeURIComponent(LF.type)}`;
-    const res=await fetch('/api/local/search?'+qs);const data=await res.json();
-    if(!res.ok)throw new Error(data.error||'Location search failed');
-    LF.lastPayload=data;
-    if(st)st.textContent=data.resolvedLocation?`Showing directory results near: ${data.resolvedLocation}`:'Search complete.';
+    let centerLat=LF.lat;
+    let centerLon=LF.lon;
+    let resolvedLocation=LF.loc;
+
+    // Geocode typed location directly from the browser
+    if(!useGeo){
+      const geoUrl='https://photon.komoot.io/api/?'+new URLSearchParams({
+        q:LF.loc,
+        limit:'1',
+        lang:'en',
+        countrycode:'IN'
+      });
+
+      const geoRes=await fetch(geoUrl);
+      if(!geoRes.ok)throw new Error('Location lookup failed');
+
+      const geoData=await geoRes.json();
+      const geo=geoData.features?.[0];
+
+      if(!geo)throw new Error('Location not found');
+
+      const coords=geo.geometry.coordinates;
+      centerLon=Number(coords[0]);
+      centerLat=Number(coords[1]);
+
+      const gp=geo.properties||{};
+      resolvedLocation=[
+        gp.name,
+        gp.city||gp.county,
+        gp.state
+      ].filter(Boolean).join(', ')||LF.loc;
+    }
+
+    if(!Number.isFinite(centerLat)||!Number.isFinite(centerLon)){
+      throw new Error('Invalid location coordinates');
+    }
+
+    LF.lat=centerLat;
+    LF.lon=centerLon;
+
+    const shopTypes={
+      all:['health_food','organic','bakery','supermarket','convenience','greengrocer','farm','food'],
+      'health-organic':['health_food','organic'],
+      'millet-grain':['health_food','organic','supermarket','greengrocer','farm'],
+      bakery:['bakery'],
+      cafe:[],
+      'produce-grocery':['supermarket','convenience','greengrocer','farm','food']
+    };
+
+    const amenityTypes={
+      all:['cafe','restaurant','fast_food','food_court'],
+      'health-organic':[],
+      'millet-grain':[],
+      bakery:[],
+      cafe:['cafe','restaurant','fast_food','food_court'],
+      'produce-grocery':[]
+    };
+
+    const shops=shopTypes[LF.type]||shopTypes.all;
+    const amenities=amenityTypes[LF.type]||amenityTypes.all;
+
+    const params=new URLSearchParams({
+      lat:String(centerLat),
+      lon:String(centerLon),
+      radius:'6',
+      limit:'50',
+      lang:'en'
+    });
+
+    shops.forEach(v=>params.append('osm_tag','shop:'+v));
+    amenities.forEach(v=>params.append('osm_tag','amenity:'+v));
+
+    let features=[];
+
+    if(LF.type!=='homemade-biz'){
+      const nearbyRes=await fetch(
+        'https://photon.komoot.io/reverse?'+params.toString()
+      );
+
+      if(!nearbyRes.ok)throw new Error('Nearby search unavailable');
+
+      const nearbyData=await nearbyRes.json();
+      features=Array.isArray(nearbyData.features)?nearbyData.features:[];
+    }
+
+    const seen=new Set();
+
+    const places=features.map(f=>{
+      const p=f.properties||{};
+      const coords=f.geometry?.coordinates||[];
+      const lon=Number(coords[0]);
+      const lat=Number(coords[1]);
+      const name=String(p.name||'').trim();
+
+      if(!name||!Number.isFinite(lat)||!Number.isFinite(lon))return null;
+
+      const key=(p.osm_type||'N')+':'+(p.osm_id||name+lat+lon);
+      if(seen.has(key))return null;
+      seen.add(key);
+
+      const shop=p.osm_key==='shop';
+      const value=p.osm_value||'';
+      const categoryKey=shop&&['organic','health_food'].includes(value)
+        ?'health-organic'
+        :value==='bakery'?'bakery'
+        :!shop?'cafe'
+        :['supermarket','convenience','greengrocer','farm','food'].includes(value)
+          ?(LF.type==='millet-grain'?'millet-grain':'produce-grocery')
+          :'health-organic';
+
+      const categoryLabels={
+        'health-organic':'Organic / Health Store',
+        'millet-grain':'Food retailer · Millet stock unverified',
+        bakery:'Bakery',
+        cafe:'Cafe / Food Outlet',
+        'produce-grocery':'Grocery / Produce Store'
+      };
+
+      const address=[
+        p.housenumber,
+        p.street,
+        p.district||p.locality,
+        p.city||p.county,
+        p.state,
+        p.postcode
+      ].filter(Boolean).join(', ');
+
+      const rad=x=>x*Math.PI/180;
+      const dLat=rad(lat-centerLat);
+      const dLon=rad(lon-centerLon);
+      const a=Math.sin(dLat/2)**2+
+        Math.cos(rad(centerLat))*Math.cos(rad(lat))*
+        Math.sin(dLon/2)**2;
+      const distanceKm=6371*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+
+      const osmTypeMap={N:'node',W:'way',R:'relation'};
+      const osmType=osmTypeMap[p.osm_type]||'node';
+
+      return {
+        id:key,
+        name,
+        address:address||resolvedLocation,
+        lat,
+        lon,
+        distanceKm:Number(distanceKm.toFixed(2)),
+        categoryKey,
+        categoryLabel:categoryLabels[categoryKey]||'Food Business',
+        phone:'',
+        website:'',
+        openingHours:'',
+        dietTags:[],
+        source:'OpenStreetMap via Photon (community-mapped)',
+        verified:false,
+        osmUrl:p.osm_id
+          ?`https://www.openstreetmap.org/${osmType}/${p.osm_id}`:''
+      };
+    }).filter(Boolean);
+
+    places.sort((a,b)=>a.distanceKm-b.distanceKm);
+
+    LF.lastPayload={
+      resolvedLocation,
+      center:{lat:centerLat,lon:centerLon},
+      source:'OpenStreetMap via Photon (live directory)',
+      places:places.slice(0,20)
+    };
+
+    if(st)st.textContent='Showing directory results near: '+resolvedLocation;
     renderLocalResults();
+
   }catch(e){
+    console.error('Browser location search failed:',e);
     LF.lastPayload={places:[],error:e.message};
-    if(st)st.textContent='Live OpenStreetMap lookup unavailable right now; showing any saved community listings.';
+
+    if(st)st.textContent='Live directory temporarily unavailable. You can still use community listings.';
     renderLocalResults();
   }
 };
+
 window.renderLocalResults=()=>{
   const out=$('#localOut');if(!out)return;
   LF.diet=$('#lDiet')?.value||'all';LF.price=$('#lPrice')?.value||'all';
