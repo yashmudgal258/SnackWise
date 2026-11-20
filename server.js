@@ -593,13 +593,14 @@ app.get('/api/local/search', async (req, res) => {
 }
 
 
-    // Search nearby food-related places using OpenStreetMap Overpass
-    const radius = 6000;
+    
+    // Search nearby food-related places using Photon
+    const radius = 6;
 
     const shopTypes = {
-      all: ['health_food', 'organic', 'bakery', 'supermarket', 'convenience', 'greengrocer', 'farm', 'food'],
-      'health-organic': ['health_food', 'organic'],
-      'millet-grain': ['health_food', 'organic', 'supermarket', 'greengrocer', 'farm'],
+      all: ['organic', 'bakery', 'supermarket', 'convenience', 'greengrocer', 'farm', 'food'],
+      'health-organic': ['organic'],
+      'millet-grain': ['organic', 'supermarket', 'greengrocer', 'farm'],
       bakery: ['bakery'],
       cafe: [],
       'produce-grocery': ['supermarket', 'convenience', 'greengrocer', 'farm', 'food'],
@@ -617,97 +618,80 @@ app.get('/api/local/search', async (req, res) => {
     const selectedShops = shopTypes[type] || shopTypes.all;
     const selectedAmenities = amenityTypes[type] || amenityTypes.all;
 
-    const clauses = [];
+    const params = new URLSearchParams({
+      lat: String(centerLat),
+      lon: String(centerLon),
+      radius: String(radius),
+      limit: '50',
+      lang: 'en',
+    });
 
-    if (selectedShops.length) {
-      clauses.push(
-        `nwr(around:${radius},${centerLat},${centerLon})["shop"~"^(${selectedShops.join('|')})$"];`
-      );
-    }
+    selectedShops.forEach(value => params.append('osm_tag', `shop:${value}`));
+    selectedAmenities.forEach(value => params.append('osm_tag', `amenity:${value}`));
 
-    if (selectedAmenities.length) {
-      clauses.push(
-        `nwr(around:${radius},${centerLat},${centerLon})["amenity"~"^(${selectedAmenities.join('|')})$"];`
-      );
-    }
+    console.log('Trying Photon nearby places search');
 
-    const overpassQuery = `
-      [out:json][timeout:20];
-      (
-        ${clauses.join('\n')}
-      );
-      out center;
-    `;
-    console.log('Trying Overpass search');
-    const overpassResponse = await fetch(
-      'https://overpass.private.coffee/api/interpreter',
+    const photonResponse = await fetch(
+      `https://photon.komoot.io/reverse?${params.toString()}`,
       {
-        method: 'POST',
         headers: {
-          ...OSM_HEADERS,
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'SnackWise/1.0',
+          'Accept-Language': 'en-IN,en;q=0.9',
         },
-        body: `data=${encodeURIComponent(overpassQuery)}`,
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(15000),
       }
     );
 
-    if (!overpassResponse.ok) {
-      throw new Error(`OVERPASS_STATUS_${overpassResponse.status}`);
+    if (!photonResponse.ok) {
+      throw new Error(`PHOTON_PLACES_STATUS_${photonResponse.status}`);
     }
 
-    const overpassData = await overpassResponse.json();
-    const elements = Array.isArray(overpassData.elements)
-      ? overpassData.elements
+    const photonData = await photonResponse.json();
+    const features = Array.isArray(photonData.features)
+      ? photonData.features
       : [];
 
     const seen = new Set();
     const places = [];
 
-    for (const element of elements) {
-      const tags = element.tags || {};
-      const name = String(tags.name || tags.brand || '').trim();
+    for (const feature of features) {
+      const props = feature.properties || {};
+      const name = String(props.name || '').trim();
+      const coordinates = feature.geometry?.coordinates || [];
 
-      if (!name) continue;
+      const pLon = Number(coordinates[0]);
+      const pLat = Number(coordinates[1]);
 
-      const key = `${element.type}:${element.id}`;
+      if (!name || !Number.isFinite(pLat) || !Number.isFinite(pLon)) continue;
+
+      const distanceKm = haversineKm(centerLat, centerLon, pLat, pLon);
+      if (distanceKm > radius) continue;
+
+      const osmTypeMap = { N: 'node', W: 'way', R: 'relation' };
+      const osmType = osmTypeMap[props.osm_type] || 'node';
+      const key = `${osmType}:${props.osm_id || `${name}:${pLat}:${pLon}`}`;
+
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const pLat = Number(element.lat ?? element.center?.lat);
-      const pLon = Number(element.lon ?? element.center?.lon);
-
-      if (!Number.isFinite(pLat) || !Number.isFinite(pLon)) continue;
-
       const p = {
         name,
-        type: tags.shop || tags.amenity || '',
-        category: tags.amenity ? 'amenity' : 'shop',
-        extratags: {
-          ...tags,
-          organic: tags.shop === 'organic' ? 'yes' : tags.organic,
-        },
+        type: props.osm_value || '',
+        category: props.osm_key === 'amenity' ? 'amenity' : 'shop',
+        extratags: {},
         display_name: name,
         address: {
-          house_number: tags['addr:housenumber'],
-          road: tags['addr:street'],
-          neighbourhood: tags['addr:neighbourhood'],
-          suburb: tags['addr:suburb'],
-          city: tags['addr:city'] || tags['addr:town'],
-          state: tags['addr:state'],
-          postcode: tags['addr:postcode'],
+          house_number: props.housenumber,
+          road: props.street,
+          neighbourhood: props.district,
+          suburb: props.locality,
+          city: props.city,
+          state: props.state,
+          postcode: props.postcode,
         },
       };
 
       const cls = classifyOsmPlace(p);
-      const dietTags = [];
-
-      if (tags.organic === 'yes' || tags.shop === 'organic') {
-        dietTags.push('Organic tagged');
-      }
-      if (tags['diet:vegetarian'] === 'yes') dietTags.push('Vegetarian tagged');
-      if (tags['diet:vegan'] === 'yes') dietTags.push('Vegan tagged');
-      if (tags['diet:gluten_free'] === 'yes') dietTags.push('Gluten-free tagged');
 
       places.push({
         id: key,
@@ -715,24 +699,25 @@ app.get('/api/local/search', async (req, res) => {
         address: formatOsmAddress(p),
         lat: pLat,
         lon: pLon,
-        distanceKm: haversineKm(centerLat, centerLon, pLat, pLon),
+        distanceKm,
         categoryKey: cls.catKey,
         categoryLabel: cls.catLabel,
-        phone: tags.phone || tags['contact:phone'] || '',
-        website: tags.website || tags['contact:website'] || '',
-        openingHours: tags.opening_hours || '',
-        dietTags,
-        source: 'OpenStreetMap (community-mapped)',
+        phone: '',
+        website: '',
+        openingHours: '',
+        dietTags: [],
+        source: 'OpenStreetMap via Photon (community-mapped)',
         verified: false,
-        osmUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+        osmUrl: `https://www.openstreetmap.org/${osmType}/${props.osm_id}`,
       });
     }
+
 
     places.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
     const payload = {
       resolvedLocation: resolvedLabel,
       center: { lat: centerLat, lon: centerLon },
-      source: 'OpenStreetMap Overpass (live directory)',
+      source: 'OpenStreetMap via Photon (live directory)',
       places: places.slice(0, 20),
     };
     if (LOCAL_CACHE.size >= 40) {
