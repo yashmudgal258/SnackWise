@@ -25,6 +25,7 @@ const SEARCH_FIELDS = [
   'allergens_tags',
   'ingredients_text',
   'nutriments',
+  'nutrition_data_per',
   'states_tags',
 ].join(',');
 
@@ -72,6 +73,7 @@ function normalizeHit(h) {
     hasNullCat: catsRaw.includes('en:null'),
     states: Array.isArray(h.states_tags) ? h.states_tags : [],
     nutriments: h.nutriments && typeof h.nutriments === 'object' ? h.nutriments : {},
+    nutPer: String(h.nutrition_data_per || '100g').trim(),
     src: 'Open Food Facts',
   };
 }
@@ -325,11 +327,24 @@ app.get('/api/off/healthy', async (req, res) => {
     let excludedCount = 0;
     let unverifiedNutritionSkipped = 0;
 
+    const stripNegations = (txt) =>
+      String(txt || '')
+        .toLowerCase()
+        .replace(/\b[a-z0-9-]+[- ]free\b/g, ' ')
+        .replace(/\b(?:no|without|free from|free of)\s+[a-z0-9-]+(?:\s+[a-z0-9-]+)?\b/g, ' ');
+
+    const matchesExclusion = (h) => {
+      if (!excludeWords.length) return false;
+      const strictHay = [h.ing, h.all, (h.allTags || []).join(' ')].join(' ').toLowerCase();
+      const nameHay = stripNegations([h.name, h.generic, h.brand].join(' '));
+      const combined = `${strictHay} ${nameHay}`;
+      return excludeWords.some((w) => combined.includes(w));
+    };
+
     // First pass: check numeric thresholds & quick text exclusions before optional v2 enrichment
     const preSurviving = [];
     for (const h of rawHits) {
-      const hay = [h.name, h.generic, h.brand, h.ing, h.all, (h.allTags || []).join(' ')].join(' ').toLowerCase();
-      if (excludeWords.length && excludeWords.some((w) => hay.includes(w))) {
+      if (matchesExclusion(h)) {
         excludedCount++;
         continue;
       }
@@ -379,9 +394,8 @@ app.get('/api/off/healthy', async (req, res) => {
     }
 
     for (const h of evaluatedHits) {
-      const hay = [h.name, h.generic, h.brand, h.ing, h.all, (h.allTags || []).join(' ')].join(' ').toLowerCase();
       if (excludeWords.length) {
-        if (excludeWords.some((w) => hay.includes(w))) {
+        if (matchesExclusion(h)) {
           excludedCount++;
           continue;
         }
@@ -447,24 +461,32 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
 }
 
-function classifyOsmPlace(p) {
+const FAST_FOOD_CHAIN_RE = /\b(mcdonald|burger king|kfc|domino|pizza hut|subway|taco bell|wendy|dunkin|popeyes|papa john|baskin|cold stone|krispy kreme|carl'?s jr|wow!?\s*momo|chicago pizza|la pino)\b/i;
+
+function classifyOsmPlace(p, requestedType = 'all') {
   const tags = p.extratags || {};
   const t = String(p.type || '').toLowerCase();
   const c = String(p.category || '').toLowerCase();
   const nameL = String(p.name || p.display_name || '').toLowerCase();
-  if (tags.organic === 'yes' || t === 'health_food' || /organic|millet|millets|healthy|nutri|nature|whole/i.test(nameL)) {
-    return { catKey: 'health-organic', catLabel: 'Organic / Health-Oriented Shop (OpenStreetMap)' };
+
+  if (tags.organic === 'yes' || t === 'health_food' || t === 'organic' || t === 'herbalist' || t === 'wholefoods' || /organic|millet|millets|healthy|nutri|nature|wholefood|ayur|satvik|sattvic|khadi|natural/i.test(nameL)) {
+    const isMillet = requestedType === 'millet-grain' || /millet|ragi|jowar|bajra|grain|atta|chakki|flour/i.test(nameL);
+    return {
+      catKey: isMillet ? 'millet-grain' : 'health-organic',
+      catLabel: isMillet ? 'Millet / Whole-Grain & Health Store (OpenStreetMap)' : 'Organic / Health-Oriented Shop (OpenStreetMap)',
+      priority: 1,
+    };
   }
-  if (t === 'bakery' || /baker|bakers|patisserie|bread/i.test(nameL)) {
-    return { catKey: 'bakery', catLabel: 'Bakery (OpenStreetMap)' };
+  if (t === 'greengrocer' || t === 'farm' || t === 'nuts' || /fruit|veg|sabzi|fresh|kisan|farm|harvest|sprout/i.test(nameL)) {
+    return { catKey: 'produce-grocery', catLabel: 'Fresh Produce / Farm Store (OpenStreetMap)', priority: 2 };
   }
-  if (c === 'amenity' || t === 'cafe' || t === 'restaurant' || /cafe|salad|juice|kitchen/i.test(nameL)) {
-    return { catKey: 'cafe', catLabel: 'Cafe / Food Outlet (OpenStreetMap)' };
+  if (t === 'bakery' || /baker|bakers|patisserie|bread|sourdough/i.test(nameL)) {
+    return { catKey: 'bakery', catLabel: 'Bakery (OpenStreetMap · Ingredients unverified)', priority: 4 };
   }
-  if (t === 'greengrocer' || t === 'farm' || /fruit|veg|sabzi|fresh|kisan/i.test(nameL)) {
-    return { catKey: 'produce-grocery', catLabel: 'Fresh Produce / Farm Store (OpenStreetMap)' };
+  if (c === 'amenity' || t === 'cafe' || /cafe|salad|juice|smoothie|bowl|tea/i.test(nameL)) {
+    return { catKey: 'cafe', catLabel: 'Cafe / Juice & Salad Outlet (OpenStreetMap)', priority: 4 };
   }
-  return { catKey: 'produce-grocery', catLabel: `Food / Grocery Store (${t || c || 'OpenStreetMap'})` };
+  return { catKey: 'produce-grocery', catLabel: `Food / Grocery Store (${t || c || 'OpenStreetMap'})`, priority: 3 };
 }
 
 function formatOsmAddress(p) {
@@ -594,26 +616,35 @@ app.get('/api/local/search', async (req, res) => {
 
 
     
-    // Search nearby food-related places using Photon
-    const radius = 6;
+    // Search nearby healthy-food-oriented places using Photon (no fast_food or food_court)
+    const radius = 7;
 
     const shopTypes = {
-      all: ['organic', 'bakery', 'supermarket', 'convenience', 'greengrocer', 'farm', 'food'],
-      'health-organic': ['organic'],
-      'millet-grain': ['organic', 'supermarket', 'greengrocer', 'farm'],
+      all: ['health_food', 'organic', 'greengrocer', 'farm', 'wholefoods', 'herbalist', 'nuts'],
+      'health-organic': ['health_food', 'organic', 'wholefoods', 'herbalist'],
+      'millet-grain': ['health_food', 'organic', 'greengrocer', 'farm', 'supermarket'],
       bakery: ['bakery'],
       cafe: [],
-      'produce-grocery': ['supermarket', 'convenience', 'greengrocer', 'farm', 'food'],
+      'produce-grocery': ['greengrocer', 'farm', 'supermarket', 'food', 'nuts'],
     };
 
     const amenityTypes = {
-      all: ['cafe', 'restaurant', 'fast_food', 'food_court'],
+      all: [],
       'health-organic': [],
       'millet-grain': [],
       bakery: [],
-      cafe: ['cafe', 'restaurant', 'fast_food', 'food_court'],
+      cafe: ['cafe'],
       'produce-grocery': [],
     };
+
+    if (type === 'homemade-biz') {
+      return res.json({
+        resolvedLocation: resolvedLabel,
+        center: { lat: centerLat, lon: centerLon },
+        source: 'Community browser listings',
+        places: [],
+      });
+    }
 
     const selectedShops = shopTypes[type] || shopTypes.all;
     const selectedAmenities = amenityTypes[type] || amenityTypes.all;
@@ -628,8 +659,6 @@ app.get('/api/local/search', async (req, res) => {
 
     selectedShops.forEach(value => params.append('osm_tag', `shop:${value}`));
     selectedAmenities.forEach(value => params.append('osm_tag', `amenity:${value}`));
-
-    console.log('Trying Photon nearby places search');
 
     const photonResponse = await fetch(
       `https://photon.komoot.io/reverse?${params.toString()}`,
@@ -657,12 +686,15 @@ app.get('/api/local/search', async (req, res) => {
     for (const feature of features) {
       const props = feature.properties || {};
       const name = String(props.name || '').trim();
+      const osmVal = String(props.osm_value || '').toLowerCase();
       const coordinates = feature.geometry?.coordinates || [];
 
       const pLon = Number(coordinates[0]);
       const pLat = Number(coordinates[1]);
 
       if (!name || !Number.isFinite(pLat) || !Number.isFinite(pLon)) continue;
+      if (['fast_food', 'food_court', 'pub', 'bar', 'ice_cream', 'alcohol', 'tobacco'].includes(osmVal)) continue;
+      if (FAST_FOOD_CHAIN_RE.test(name)) continue;
 
       const distanceKm = haversineKm(centerLat, centerLon, pLat, pLon);
       if (distanceKm > radius) continue;
@@ -691,7 +723,7 @@ app.get('/api/local/search', async (req, res) => {
         },
       };
 
-      const cls = classifyOsmPlace(p);
+      const cls = classifyOsmPlace(p, type);
 
       places.push({
         id: key,
@@ -702,18 +734,18 @@ app.get('/api/local/search', async (req, res) => {
         distanceKm,
         categoryKey: cls.catKey,
         categoryLabel: cls.catLabel,
+        priority: cls.priority,
         phone: '',
         website: '',
         openingHours: '',
         dietTags: [],
         source: 'OpenStreetMap via Photon (community-mapped)',
         verified: false,
-        osmUrl: `https://www.openstreetmap.org/${osmType}/${props.osm_id}`,
+        osmUrl: props.osm_id ? `https://www.openstreetmap.org/${osmType}/${props.osm_id}` : '',
       });
     }
 
-
-    places.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
+    places.sort((a, b) => (a.priority - b.priority) || ((a.distanceKm ?? 999) - (b.distanceKm ?? 999)));
     const payload = {
       resolvedLocation: resolvedLabel,
       center: { lat: centerLat, lon: centerLon },
