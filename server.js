@@ -1,9 +1,17 @@
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+let HEALTHY_CATALOG = [];
+try {
+  HEALTHY_CATALOG = JSON.parse(fs.readFileSync(path.join(__dirname, 'healthy_catalog.json'), 'utf8'));
+} catch {
+  HEALTHY_CATALOG = [];
+}
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -271,15 +279,32 @@ function detectMarketingBuzz(name = '') {
 
 const HEALTHY_CACHE = new Map();
 const HEALTHY_QUERIES = {
-  all: ['roasted makhana', 'roasted chana', 'millet', 'oats'],
-  'roasted-baked': ['roasted makhana', 'roasted chana', 'baked chips'],
-  fruit: ['dried mango', 'date bar', '100% fruit juice'],
-  millet: ['millet', 'ragi', 'jowar'],
-  'high-fibre': ['oats', 'roasted chana', 'multigrain'],
-  'low-sugar': ['roasted makhana', 'oats', 'plain almonds'],
-  'low-sodium': ['rolled oats', 'unsalted almonds', 'roasted makhana'],
-  'protein-rich': ['roasted chana', 'chickpeas', 'greek yogurt'],
+  all: ['roasted makhana', 'roasted chana', 'ragi chips', 'rolled oats'],
+  'roasted-baked': ['roasted makhana', 'roasted chana', 'popcorn'],
+  fruit: ['dried mango', 'dates', 'date bar'],
+  millet: ['millet', 'ragi', 'jowar puffs'],
+  'whole-grain': ['rolled oats', 'puffed rice cake', 'quinoa puffs'],
+  'nuts-seeds': ['almonds', 'pumpkin seeds', 'trail mix'],
+  'biscuits-crackers': ['multigrain crackers', 'oat biscuits', 'seed crackers'],
+  'high-fibre': ['oats', 'roasted chana', 'multigrain crackers'],
+  'low-sugar': ['roasted makhana', 'dark chocolate 85', 'unsweetened peanut butter'],
+  'low-sodium': ['rolled oats', 'almonds', 'roasted chana'],
+  'protein-rich': ['roasted chana', 'roasted chickpeas', 'unsweetened peanut butter'],
 };
+
+function inferHealthyCategory(h, fallbackCat = '') {
+  if (h.snackCategory && h.snackCatKey) return { key: h.snackCatKey, label: h.snackCategory };
+  const txt = [h.name, h.generic, ...(h.cats || [])].join(' ').toLowerCase();
+  if (/ragi|millet|jowar|bajra/.test(txt)) return { key: 'millet', label: 'Millet-based snacks' };
+  if (/makhana|chana|popcorn|roasted|baked/.test(txt)) return { key: 'roasted-baked', label: 'Roasted snacks' };
+  if (/almond|walnut|cashew|seed|pistachio|trail mix/.test(txt)) return { key: 'nuts-seeds', label: 'Nuts & seeds' };
+  if (/mango|date|raisin|fig|dried fruit|juice/.test(txt)) return { key: 'fruit', label: 'Dried fruits' };
+  if (/cracker|biscuit|cookie|crispbread|digestive/.test(txt)) return { key: 'biscuits-crackers', label: 'Healthy biscuits & crackers' };
+  if (/oat|rice cake|quinoa|multigrain|whole/.test(txt)) return { key: 'whole-grain', label: 'Whole-grain snacks' };
+  if (/chickpea|protein|edamame|yogurt/.test(txt)) return { key: 'protein-rich', label: 'Protein & legume snacks' };
+  if (fallbackCat && HEALTHY_QUERIES[fallbackCat]) return { key: fallbackCat, label: fallbackCat.replace(/-/g, ' ') };
+  return { key: 'other', label: 'Packaged snack options' };
+}
 
 app.get('/api/off/healthy', async (req, res) => {
   const cat = String(req.query.cat || 'all').trim();
@@ -295,32 +320,67 @@ app.get('/api/off/healthy', async (req, res) => {
   const cacheKey = `${cat}|${terms.join(',').toLowerCase()}`;
 
   try {
-    let rawHits;
-    const cached = HEALTHY_CACHE.get(cacheKey);
-    if (cached && Date.now() - cached.ts < 300000) {
-      rawHits = cached.hits;
-    } else {
-      const settled = await Promise.allSettled(terms.map((t) => queryOffSearch(t, 12)));
-      const seen = new Set();
-      rawHits = [];
-      for (const r of settled) {
-        if (r.status === 'fulfilled') {
-          for (const item of r.value) {
-            const norm = stripZero(item.code);
-            if (!norm || seen.has(norm)) continue;
-            seen.add(norm);
-            rawHits.push(item);
+    // Evaluate verified HEALTHY_CATALOG matches first
+    const catalogMatches = HEALTHY_CATALOG.filter((item) => {
+      if (q) {
+        const qL = q.toLowerCase();
+        const hay = [item.name, item.brand, item.snackCategory, item.ing, ...(item.cats || [])].join(' ').toLowerCase();
+        if (!hay.includes(qL)) return false;
+      }
+      if (cat !== 'all' && !['high-fibre', 'low-sugar', 'low-sodium', 'protein-rich'].includes(cat)) {
+        if (cat === 'roasted-baked') return item.snackCatKey === 'roasted-baked' || item.snackCatKey === 'protein-rich';
+        return item.snackCatKey === cat;
+      }
+      return true;
+    });
+
+    let liveHits = [];
+    if (q || catalogMatches.length < 6) {
+      if (q) {
+        liveHits = await queryOffSearch(q, 24).catch(() => []);
+      } else {
+        const cached = HEALTHY_CACHE.get(cacheKey);
+        if (cached && Date.now() - cached.ts < 600000) {
+          liveHits = cached.hits;
+        } else {
+          const settled = await Promise.allSettled(terms.slice(0, 3).map((t) => queryOffSearch(t, 12)));
+          const seenLive = new Set();
+          for (const r of settled) {
+            if (r.status === 'fulfilled') {
+              for (const item of r.value) {
+                const norm = stripZero(item.code);
+                if (!norm || seenLive.has(norm)) continue;
+                if (!item.imgSmall && !item.img) continue;
+                seenLive.add(norm);
+                liveHits.push(item);
+              }
+            }
+          }
+          if (liveHits.length) {
+            if (HEALTHY_CACHE.size >= 40) {
+              const fk = HEALTHY_CACHE.keys().next().value;
+              if (fk) HEALTHY_CACHE.delete(fk);
+            }
+            HEALTHY_CACHE.set(cacheKey, { ts: Date.now(), hits: liveHits });
           }
         }
       }
-      if (!rawHits.length && settled.every((r) => r.status === 'rejected')) {
-        throw new Error('OFF_HEALTHY_FAILED');
-      }
-      if (HEALTHY_CACHE.size >= 40) {
-        const fk = HEALTHY_CACHE.keys().next().value;
-        if (fk) HEALTHY_CACHE.delete(fk);
-      }
-      HEALTHY_CACHE.set(cacheKey, { ts: Date.now(), hits: rawHits });
+    }
+
+    // Merge verified HEALTHY_CATALOG with live OFF hits, deduplicating by code
+    const seenMerged = new Set();
+    const rawHits = [];
+    const addUnique = (h) => {
+      const norm = stripZero(h.code);
+      if (!norm || seenMerged.has(norm)) return;
+      seenMerged.add(norm);
+      rawHits.push(h);
+    };
+    catalogMatches.forEach(addUnique);
+    liveHits.forEach(addUnique);
+
+    if (!rawHits.length && q) {
+      return res.json({ source: 'Open Food Facts', items: [], excludedCount: 0, unverifiedNutritionSkipped: 0 });
     }
 
     const items = [];
@@ -330,8 +390,8 @@ app.get('/api/off/healthy', async (req, res) => {
     const stripNegations = (txt) =>
       String(txt || '')
         .toLowerCase()
-        .replace(/\b[a-z0-9-]+[- ]free\b/g, ' ')
-        .replace(/\b(?:no|without|free from|free of)\s+[a-z0-9-]+(?:\s+[a-z0-9-]+)?\b/g, ' ');
+        .replace(/\b[a-z0-9-]+[- ](?:free|friendly|friendliness|allergy)\b/g, ' ')
+        .replace(/\b(?:no|without|free from|free of|instead of)\s+[a-z0-9-]+(?:\s+[a-z0-9-]+)?\b/g, ' ');
 
     const matchesExclusion = (h) => {
       if (!excludeWords.length) return false;
@@ -341,7 +401,6 @@ app.get('/api/off/healthy', async (req, res) => {
       return excludeWords.some((w) => combined.includes(w));
     };
 
-    // First pass: check numeric thresholds & quick text exclusions before optional v2 enrichment
     const preSurviving = [];
     for (const h of rawHits) {
       if (matchesExclusion(h)) {
@@ -357,7 +416,7 @@ app.get('/api/off/healthy', async (req, res) => {
       const fiber = typeof nu.fiber_100g === 'number' ? nu.fiber_100g : null;
       const effSalt = salt != null ? salt : sodium != null ? sodium * 2.5 : null;
 
-      if (cat === 'low-sugar' && (sugar == null || sugar > 5)) {
+      if (cat === 'low-sugar' && (sugar == null || sugar > 7)) {
         if (sugar == null) unverifiedNutritionSkipped++;
         continue;
       }
@@ -373,13 +432,12 @@ app.get('/api/off/healthy', async (req, res) => {
         if (fiber == null) unverifiedNutritionSkipped++;
         continue;
       }
-      if (taste === 'sweet' && sugar != null && salt != null && sugar < 2 && salt > 0.8) continue;
-      if (taste === 'savoury' && sugar != null && salt != null && sugar > 12 && salt < 0.2) continue;
+      if (taste === 'sweet' && sugar != null && salt != null && sugar < 3 && salt > 0.5) continue;
+      if (taste === 'savoury' && sugar != null && salt != null && sugar > 14 && salt < 0.25) continue;
 
       preSurviving.push(h);
     }
 
-    // If active allergy/avoid exclusions exist and hits lack ingredients_text, enrich up to 10 in gentle batches
     let evaluatedHits = preSurviving;
     if (excludeWords.length) {
       const needEnrich = preSurviving.filter((h) => !(h.ing || '').trim()).slice(0, 10);
@@ -399,7 +457,6 @@ app.get('/api/off/healthy', async (req, res) => {
           excludedCount++;
           continue;
         }
-        // Under active allergy/avoid filter, never pass records still missing ingredients_text
         if (!(h.ing || '').trim()) {
           unverifiedNutritionSkipped++;
           continue;
@@ -417,26 +474,33 @@ app.get('/api/off/healthy', async (req, res) => {
       const effSalt = salt != null ? salt : sodium != null ? sodium * 2.5 : null;
 
       const reasons = [];
-      if (sugar != null && sugar <= 5) reasons.push(`Listed sugars: ${Math.round(sugar * 10) / 10}g / 100g`);
-      if (effSalt != null && effSalt <= 0.6) reasons.push(`Listed salt: ${Math.round(effSalt * 100) / 100}g / 100g`);
-      if (fiber != null && fiber >= 3) reasons.push(`Listed fibre: ${Math.round(fiber * 10) / 10}g / 100g`);
-      if (protein != null && protein >= 8) reasons.push(`Listed protein: ${Math.round(protein * 10) / 10}g / 100g`);
-      if (satfat != null && satfat <= 2) reasons.push(`Listed saturated fat: ${Math.round(satfat * 10) / 10}g / 100g`);
+      if (sugar != null && sugar <= 5) reasons.push(`Low listed sugars: ${Math.round(sugar * 10) / 10}g / 100g`);
+      if (effSalt != null && effSalt <= 0.6) reasons.push(`Low listed salt: ${Math.round(effSalt * 100) / 100}g / 100g`);
+      if (fiber != null && fiber >= 3) reasons.push(`Source of fibre: ${Math.round(fiber * 10) / 10}g / 100g`);
+      if (protein != null && protein >= 8) reasons.push(`Protein listed: ${Math.round(protein * 10) / 10}g / 100g`);
+      if (satfat != null && satfat <= 2) reasons.push(`Low saturated fat: ${Math.round(satfat * 10) / 10}g / 100g`);
       if (!reasons.length && energy != null) {
-        reasons.push(`Matched category search with listed energy (${Math.round(energy)} kcal / 100g); check all fields before choosing`);
+        reasons.push(`Open Food Facts record (${Math.round(energy)} kcal / 100g); inspect full sugars, salt and oils`);
       }
 
+      const catInfo = inferHealthyCategory(h, cat);
       const buzzwords = detectMarketingBuzz(h.name);
       items.push({
         ...h,
+        snackCatKey: catInfo.key,
+        snackCategory: catInfo.label,
         reasons,
         buzzwords,
       });
     }
 
+    // Prioritize items with verified product images so cards render crisply
+    items.sort((a, b) => Number(Boolean(b.imgSmall || b.img)) - Number(Boolean(a.imgSmall || a.img)));
+
     return res.json({
       source: 'Open Food Facts',
-      items: items.slice(0, 12),
+      items: items.slice(0, 52),
+      totalCatalog: HEALTHY_CATALOG.length,
       excludedCount,
       unverifiedNutritionSkipped,
     });

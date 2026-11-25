@@ -351,7 +351,7 @@ const pickSafeImage = (url, code) => {
 };
 
 window.imgFail = el => {
-  const w = el.closest('.prod-img-wrap,.dash-mini-img,.recipe-pic,.pic');
+  const w = el.closest('.prod-img-wrap,.dash-mini-img,.recipe-pic,.pic,.hero-photo,.tile-img');
   if (w) { w.classList.remove('is-loading'); w.classList.add('is-empty'); }
   el.removeAttribute('src');
   el.style.display = 'none';
@@ -587,25 +587,70 @@ const getPersonalRecipes = () => {
   return out.slice(0, 3);
 };
 
+const HERO_VISUAL_PART = `<div class="hero-visual">
+  <div class="hero-photo main"><img src="/src/assets/images/millet_snack_platter_1795096750249.jpg" alt="Roasted makhana, millet crisps and wholesome Indian snacks" referrerpolicy="no-referrer" onerror="imgFail(this)"><div class="img-fallback">${PKG_ICON}<span>Wholesome snacks</span></div></div>
+  <div class="hero-photo small"><img src="/src/assets/images/dhokla_besan_bites_1795096750930.jpg" alt="Steamed besan dhokla bites with fresh herbs" referrerpolicy="no-referrer" onerror="imgFail(this)"><div class="img-fallback">${PKG_ICON}<span>Steamed bites</span></div></div>
+  <div class="hero-photo small"><img src="/src/assets/images/mint_lemon_cooler_1795096751047.jpg" alt="Fresh mint lemon cooler with basil seeds" referrerpolicy="no-referrer" onerror="imgFail(this)"><div class="img-fallback">${PKG_ICON}<span>Fresh coolers</span></div></div>
+</div>`;
+
+const tileThumbHTML = (src, alt, tall = false) => `<div class="tile-img${tall ? ' tall' : ''}"><img src="${esc(src)}" alt="${esc(alt)}" loading="lazy" referrerpolicy="no-referrer" onerror="imgFail(this)"><div class="img-fallback">${PKG_ICON}<span>SnackWise photo</span></div></div>`;
+
+const HOME_PROMO_AND_METHOD_HTML = () => `<div class="home-promo">
+  <div>
+    <h3>School picnic or lunchbox coming up?</h3>
+    <p>Start with snacks your child already enjoys and discover familiar look-alike textures, homemade recipes, and local stores.</p>
+  </div>
+  <div style="display:flex;gap:.55rem;flex-wrap:wrap">
+    <a class="btn" href="#similar">Look-Alike Finder</a>
+    <button class="btn l" type="button" onclick="catGo('occ','picnic')">Picnic ideas</button>
+  </div>
+</div>
+
+<div class="home-paths">
+  <a class="path-card tile" href="#similar">
+    <span class="step-num">Swaps</span>
+    <div><h3>Snack Look-Alike Finder</h3><p class="mut">Start with potato chips, chocolate biscuits, namkeen or soda and explore similar crunch or sweetness.</p></div>
+  </a>
+  <a class="path-card tile" href="#discover">
+    <span class="step-num">Explore</span>
+    <div><h3>Discover by Taste &amp; Texture</h3><p class="mut">Filter quick snack ideas by crunch, juiciness, effort and ingredients already in your kitchen.</p></div>
+  </a>
+</div>
+
+<div class="methodology">
+  <h2>How SnackWise supports your decisions</h2>
+  <div class="method-grid">
+    <div class="method-item"><span class="step-num">01</span><h3>Evidence over marketing</h3><p class="mut">Claims like “natural”, “organic”, or “high-protein” are cross-checked against listed sugars, sodium, oils and ingredients.</p></div>
+    <div class="method-item"><span class="step-num">02</span><h3>Honest missing-data handling</h3><p class="mut">Missing nutrition or ingredient fields are flagged explicitly rather than assumed safe or filled with invented numbers.</p></div>
+    <div class="method-item"><span class="step-num">03</span><h3>Not medical verification</h3><p class="mut">SnackWise highlights words you want to watch locally; always verify physical package labels and follow clinical advice.</p></div>
+  </div>
+</div>`;
+
 const renderParentHome = () => {
   const p = S.profile || {};
   const hasProf = hasProfData(p);
   const { avoidWords, allergyExclusions, conditions } = getActiveExclusions();
   const ageLabel = { '1-3': '1 to 3 years', '4-7': '4 to 7 years', '8-12': '8 to 12 years', '13-16': '13 to 16 years' }[p.who || '4-7'] || '4 to 7 years';
   if (!hasProf) {
-    return `<section class="dash-hero">
-      <div class="dash-top">
-        <div>
-          <span class="kicker-text">Parent Profile Mode · Local browser storage</span>
-          <h1 style="font-size:clamp(1.85rem,3.6vw,2.65rem);margin:.45rem 0">Personalise SnackWise for your child</h1>
-          <p class="mut" style="max-width:60ch">No child profile is saved yet. Add your child's age group, dietary context, favourite textures, or ingredients to watch so SnackWise can highlight relevant label details across searches and recipes.</p>
+    return `<section class="hero">
+      <div class="hero-copy">
+        <span class="kicker-text">Parent Profile Mode · Local browser storage</span>
+        <h1>Personalise SnackWise for your child</h1>
+        <p>No child profile is saved yet. Add your child's age group, dietary context, favourite textures, or ingredients to watch so SnackWise can highlight relevant label details across searches and recipes.</p>
+        <div class="hero-actions">
+          <a class="btn" href="#profile">Create child profile</a>
+          <a class="btn l" href="#healthy">Healthy Snack Discovery</a>
+          <button class="btn l" type="button" onclick="setMode('guest')">Guest Mode</button>
+        </div>
+        <div class="hero-points">
+          <span>Saved locally in this browser</span>
+          <span aria-hidden="true">·</span>
+          <span>${getRecipes().length} complete recipes</span>
+          <span aria-hidden="true">·</span>
+          <span>Open Food Facts checks</span>
         </div>
       </div>
-      <div class="hero-actions">
-        <a class="btn" href="#profile">Create child profile</a>
-        <button class="btn l" type="button" onclick="setMode('guest')">Switch to Guest Mode</button>
-        <a class="btn l" href="#healthy">Healthy Snack Discovery</a>
-      </div>
+      ${HERO_VISUAL_PART}
     </section>
     <div class="quick-tools">
       <div class="quick-search">
@@ -614,14 +659,19 @@ const renderParentHome = () => {
       </div>
       <div class="quick-links"><a href="#healthy">Healthy Discovery</a><a href="#local">Near You</a><a href="#recipes">${getRecipes().length} Recipes</a><a href="#scan">Scan Barcode</a></div>
     </div>
-    <div class="grid home-tools">${[
-      ['profile', 'Set Up Child Profile', 'Record age group, preferences and ingredient words to check locally.'],
-      ['healthy', 'Healthy Snack Discovery', 'Filter roasted, millet, fruit, lower-sugar and homemade options transparently.'],
-      ['local', 'Find Healthy Food Near You', 'Discover nearby organic stores, produce shops and homemade snack sellers.'],
-      ['recipes', 'Recipe Studio (' + getRecipes().length + ' Recipes)', 'Complete measured Indian snacks, lunchbox bites and homemade packaged swaps.'],
-      ['scan', 'Product Check & Labels', 'Search Open Food Facts products, inspect nutrition panels and view alternatives.'],
-      ['planner', 'Picnic & Week Planner', 'Organise snacks for school picnics and weekly lunchboxes.'],
-    ].map((c, idx) => `<a class="card tile" href="#${c[0]}"><span class="step-num">0${idx + 1}</span><h3>${c[1]}</h3><span class="mut">${c[2]}</span></a>`).join('')}</div>`;
+    <div class="home-intro">
+      <div><h2>Explore healthy tools for your family</h2><p class="mut">Every discovery filter, recipe and label check works seamlessly alongside your Parent Profile.</p></div>
+      <a class="btn s" href="#profile">Set up profile →</a>
+    </div>
+    <div class="bento-grid">${[
+      ['healthy', 'Healthy Snack Discovery', 'Filter roasted, millet, nuts & seeds, fruit, lower-sugar and homemade options transparently.', EXTRA_RECIPE_IMAGES.millet, 'Wholesome millet and roasted snack platter', true],
+      ['recipes', 'Recipe Studio (' + getRecipes().length + ' Recipes)', 'Complete measured Indian snacks, lunchbox bites and homemade packaged swaps.', EXTRA_RECIPE_IMAGES.dhokla, 'Steamed besan dhokla bites'],
+      ['scan', 'Product Check & Labels', 'Search Open Food Facts products, inspect nutrition panels and view alternatives.', EXTRA_RECIPE_IMAGES.sprouts, 'Roasted chana and sprouted snack bowl'],
+      ['local', 'Find Healthy Food Near You', 'Discover nearby organic stores, produce shops and homemade snack sellers.', EXTRA_RECIPE_IMAGES.cooler, 'Fresh mint lemon cooler'],
+      ['compare', 'Compare Food Labels', 'Compare sugars, salt, sodium, fibre, saturated fat and ingredients side by side.', ''],
+      ['planner', 'Picnic & Week Planner', 'Organise snacks for school picnics and weekly lunchboxes.', ''],
+    ].map((c, idx) => `<a class="card tile${idx === 0 ? ' bento-wide' : ''}" href="#${c[0]}"><div>${c[3] ? tileThumbHTML(c[3], c[4], idx === 0) : ''}<span class="step-num">0${idx + 1}</span><h3>${c[1]}</h3><p class="mut">${c[2]}</p></div><span class="tile-cta">Open section →</span></a>`).join('')}</div>
+    ${HOME_PROMO_AND_METHOD_HTML()}`;
   }
 
   const suggestions = getPersonalSuggestions();
@@ -631,13 +681,18 @@ const renderParentHome = () => {
   const likesList = list(p.likes);
   const condText = [...conditions, p.other].filter(Boolean).join(', ');
   return `<section class="dash-hero">
-    <div class="dash-top">
-      <div>
-        <div class="meta-line" style="margin-bottom:.35rem"><span>Parent Profile Active</span><span aria-hidden="true">·</span><span>Saved locally in this browser only</span></div>
-        <h1 style="font-size:clamp(1.85rem,3.5vw,2.55rem);margin:0 0 .35rem">${p.name ? esc(p.name) + '\'s Snack Dashboard' : 'Parent Snack Dashboard'}</h1>
-        <p class="mut" style="margin:0;max-width:62ch">Tailored around your recorded preferences and ingredient checks across Healthy Discovery, Recipes, and Label Checks. Always verify physical product labels before serving.</p>
+    <div class="dash-hero-grid">
+      <div class="hero-copy">
+        <div class="meta-line" style="margin-bottom:.4rem"><span class="kicker-text">Parent Profile Active</span><span aria-hidden="true">·</span><span>Saved locally in this browser only</span></div>
+        <h1 style="font-size:clamp(1.85rem,3.5vw,2.6rem);margin:0 0 .45rem">${p.name ? esc(p.name) + '\'s Snack Dashboard' : 'Parent Snack Dashboard'}</h1>
+        <p style="margin:0;max-width:56ch">Tailored around your recorded preferences and ingredient checks across Healthy Discovery, Recipes, and Label Checks. Always verify physical product labels before serving.</p>
+        <div class="hero-actions">
+          <a class="btn" href="#healthy">Explore Healthy Snacks</a>
+          <a class="btn l" href="#profile">Edit profile</a>
+          <button class="btn l" type="button" onclick="setMode('guest')">Guest Mode</button>
+        </div>
       </div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap"><a class="btn s" href="#profile">Edit profile</a><button class="btn s l" type="button" onclick="setMode('guest')">Guest Mode</button></div>
+      ${HERO_VISUAL_PART}
     </div>
     <div class="dash-summary">
       <div class="dash-stat"><div class="dash-k">Age Group</div><div class="dash-v">${esc(ageLabel)}</div></div>
@@ -679,14 +734,9 @@ const renderParentHome = () => {
         return rc ? `<div class="dash-list-item"><div style="flex:1;min-width:0"><b>${esc(rc.n)}</b><div class="meta-line"><span>Saved recipe</span><span>· ${esc(rc.prep)}</span></div></div><button class="btn s l" type="button" onclick="openRecipe('${esc(rc.id)}')">Open</button></div>` : '';
       }).join('')}${S.savedPlaces.slice(0, 2).map(pl => `<div class="dash-list-item"><div style="flex:1;min-width:0"><b>${esc(pl.name)}</b><div class="meta-line"><span>Saved local place</span></div></div><a class="btn s l" href="#local">Finder</a></div>`).join('')}${S.snacks.slice(0, 2).map(sn => `<div class="dash-list-item"><div style="flex:1;min-width:0"><b>${esc(sn)}</b><div class="meta-line"><span>Saved snack idea</span></div></div><a class="btn s l" href="#planner">Plan</a></div>`).join('')}` : `<p class="mut">Nothing saved yet. Save products, recipes from Recipe Studio, or local places near you.</p>`}
     </div>
-  </div>`;
+  </div>
+  ${HOME_PROMO_AND_METHOD_HTML()}`;
 };
-
-const HERO_VISUAL_PART = `<div class="hero-visual">
-  <div class="hero-photo main"><img src="/src/assets/images/millet_snack_platter_1795096750249.jpg" alt="Roasted makhana, millet crisps and wholesome Indian snacks" referrerpolicy="no-referrer" onerror="imgFail(this)"></div>
-  <div class="hero-photo small"><img src="/src/assets/images/dhokla_besan_bites_1795096750930.jpg" alt="Steamed besan dhokla bites with fresh herbs" referrerpolicy="no-referrer" onerror="imgFail(this)"></div>
-  <div class="hero-photo small"><img src="/src/assets/images/mint_lemon_cooler_1795096751047.jpg" alt="Fresh mint lemon cooler with basil seeds" referrerpolicy="no-referrer" onerror="imgFail(this)"></div>
-</div>`;
 
 V.home = () => {
   if (isParent()) return renderParentHome();
@@ -730,73 +780,59 @@ V.home = () => {
 
   <div class="bento-grid">
     <a class="card tile bento-wide" href="#healthy">
-      <span class="step-num">01 · Core Discovery</span>
-      <h3>Healthy Snack Discovery</h3>
-      <p class="mut">Filter roasted, millet, fruit, high-fibre, lower-sugar and lower-sodium options with transparent nutrient reasons—no arbitrary health scores or marketing hype.</p>
+      <div>
+        ${tileThumbHTML(EXTRA_RECIPE_IMAGES.millet, 'Wholesome millet and roasted snack platter', true)}
+        <span class="step-num">01 · Core Discovery</span>
+        <h3>Healthy Snack Discovery</h3>
+        <p class="mut">Filter roasted, millet, nuts &amp; seeds, fruit, high-fibre, lower-sugar and lower-sodium options with transparent nutrient reasons—no arbitrary health scores or marketing hype.</p>
+      </div>
       <span class="tile-cta">Browse healthy filters →</span>
     </a>
     <a class="card tile" href="#scan">
-      <span class="step-num">02 · Label Check</span>
-      <h3>Search &amp; Scan Products</h3>
-      <p class="mut">Look up packaged items by name or camera barcode, inspect ingredients and allergens, and explore better alternatives.</p>
+      <div>
+        ${tileThumbHTML(EXTRA_RECIPE_IMAGES.sprouts, 'Roasted chana and sprouted snack bowl')}
+        <span class="step-num">02 · Label Check</span>
+        <h3>Search &amp; Scan Products</h3>
+        <p class="mut">Look up packaged items by name or camera barcode, inspect ingredients and allergens, and explore better alternatives.</p>
+      </div>
       <span class="tile-cta">Check a label →</span>
     </a>
     <a class="card tile" href="#recipes">
-      <span class="step-num">03 · Kitchen Studio</span>
-      <h3>${getRecipes().length} Complete Recipes</h3>
-      <p class="mut">Measured Indian snacks, school picnic boxes and homemade swaps for chips, biscuits and fizzy drinks.</p>
+      <div>
+        ${tileThumbHTML(EXTRA_RECIPE_IMAGES.dhokla, 'Steamed besan dhokla snack bites')}
+        <span class="step-num">03 · Kitchen Studio</span>
+        <h3>${getRecipes().length} Complete Recipes</h3>
+        <p class="mut">Measured Indian snacks, school picnic boxes and homemade swaps for chips, biscuits and fizzy drinks.</p>
+      </div>
       <span class="tile-cta">Open Recipe Studio →</span>
     </a>
     <a class="card tile" href="#compare">
-      <span class="step-num">04 · Side-by-Side</span>
-      <h3>Compare Food Labels</h3>
-      <p class="mut">Compare sugars, salt, sodium, fibre, saturated fat, protein, pack size and ingredients per 100g or 100ml.</p>
+      <div>
+        <span class="step-num">04 · Side-by-Side</span>
+        <h3>Compare Food Labels</h3>
+        <p class="mut">Compare sugars, salt, sodium, fibre, saturated fat, protein, pack size and ingredients per 100g or 100ml.</p>
+      </div>
       <span class="tile-cta">Compare products →</span>
     </a>
     <a class="card tile" href="#local">
-      <span class="step-num">05 · Local Directory</span>
-      <h3>Find Healthy Food Near You</h3>
-      <p class="mut">Search Indian cities, PIN codes or your location for organic shops, fresh produce markets and community sellers.</p>
+      <div>
+        ${tileThumbHTML(EXTRA_RECIPE_IMAGES.cooler, 'Fresh mint lemon cooler with basil seeds')}
+        <span class="step-num">05 · Local Directory</span>
+        <h3>Find Healthy Food Near You</h3>
+        <p class="mut">Search Indian cities, PIN codes or your location for organic shops, fresh produce markets and community sellers.</p>
+      </div>
       <span class="tile-cta">Search nearby →</span>
     </a>
     <a class="card tile" href="#planner">
-      <span class="step-num">06 · Weekly Routine</span>
-      <h3>Picnic &amp; Lunchbox Planner</h3>
-      <p class="mut">Organise snack ideas and homemade recipes across school picnics, lunchboxes and weekdays.</p>
+      <div>
+        <span class="step-num">06 · Weekly Routine</span>
+        <h3>Picnic &amp; Lunchbox Planner</h3>
+        <p class="mut">Organise snack ideas and homemade recipes across school picnics, lunchboxes and weekdays.</p>
+      </div>
       <span class="tile-cta">Open planner →</span>
     </a>
   </div>
-
-  <div class="home-promo">
-    <div>
-      <h3>School picnic or lunchbox coming up?</h3>
-      <p>Start with snacks your child already enjoys and discover familiar look-alike textures, homemade recipes, and local stores.</p>
-    </div>
-    <div style="display:flex;gap:.55rem;flex-wrap:wrap">
-      <a class="btn" href="#similar">Look-Alike Finder</a>
-      <button class="btn l" type="button" onclick="catGo('occ','picnic')">Picnic ideas</button>
-    </div>
-  </div>
-
-  <div class="home-paths">
-    <a class="path-card tile" href="#similar">
-      <span class="step-num">Swaps</span>
-      <div><h3>Snack Look-Alike Finder</h3><p class="mut">Start with potato chips, chocolate biscuits, namkeen or soda and explore similar crunch or sweetness.</p></div>
-    </a>
-    <a class="path-card tile" href="#discover">
-      <span class="step-num">Explore</span>
-      <div><h3>Discover by Taste &amp; Texture</h3><p class="mut">Filter quick snack ideas by crunch, juiciness, effort and ingredients already in your kitchen.</p></div>
-    </a>
-  </div>
-
-  <div class="methodology">
-    <h2>How SnackWise supports your decisions</h2>
-    <div class="method-grid">
-      <div class="method-item"><span class="step-num">01</span><h3>Evidence over marketing</h3><p class="mut">Claims like “natural”, “organic”, or “high-protein” are cross-checked against listed sugars, sodium, oils and ingredients.</p></div>
-      <div class="method-item"><span class="step-num">02</span><h3>Honest missing-data handling</h3><p class="mut">Missing nutrition or ingredient fields are flagged explicitly rather than assumed safe or filled with invented numbers.</p></div>
-      <div class="method-item"><span class="step-num">03</span><h3>Not medical verification</h3><p class="mut">SnackWise highlights words you want to watch locally; always verify physical package labels and follow clinical advice.</p></div>
-    </div>
-  </div>`;
+  ${HOME_PROMO_AND_METHOD_HTML()}`;
 };
 
 /* --- Profile / Mode --- */
@@ -1468,12 +1504,24 @@ function renderAlternatives(p, data) {
 /* --- Healthy Snack Discovery --- */
 let HF = { cat: 'all', taste: 'all', src: 'all', diet: 'all', avoid: '', prep: 'all', budget: 'all', q: '', showAllHome: false };
 window._healthyPackMap = {};
-const HEALTHY_CATS = [['all', 'All categories'], ['roasted-baked', 'Roasted & baked'], ['fruit', 'Fruit-based'], ['millet', 'Millet & whole-grain'], ['high-fibre', 'High-fibre'], ['low-sugar', 'Lower-sugar'], ['low-sodium', 'Lower-sodium'], ['protein-rich', 'Protein-rich']];
+const HEALTHY_CATS = [
+  ['all', 'All categories'],
+  ['millet', 'Millet-based'],
+  ['whole-grain', 'Whole-grain'],
+  ['roasted-baked', 'Roasted snacks'],
+  ['nuts-seeds', 'Nuts & seeds'],
+  ['fruit', 'Dried fruits'],
+  ['biscuits-crackers', 'Biscuits & crackers'],
+  ['low-sugar', 'Lower-sugar'],
+  ['low-sodium', 'Lower-sodium'],
+  ['high-fibre', 'High-fibre'],
+  ['protein-rich', 'Protein-rich'],
+];
 
 V.healthy = () => {
   const { allExclusions } = getActiveExclusions();
   return `<div class="page-head">
-    <div><h2>Healthy Snack Discovery</h2><p class="mut section-intro" style="margin-bottom:0">Explore nutrient-checked packaged options alongside homemade recipes. Reasons cite actual listed values rather than arbitrary scores—and marketing buzzwords like “natural”, “organic”, or “high-protein” are never treated as proof.</p></div>
+    <div><h2>Healthy Snack Discovery</h2><p class="mut section-intro" style="margin-bottom:0">Explore 50+ verified Open Food Facts packaged snacks alongside ${getRecipes().length} homemade recipes. Reasons cite actual listed values rather than arbitrary scores—and marketing buzzwords like “natural”, “organic”, or “high-protein” are never treated as proof.</p></div>
     <span class="status-text">${isParent() ? 'Parent Profile' : 'Guest Mode'}</span>
   </div>
   ${allExclusions.length ? `<div class="note"><b>Parent Profile Active:</b> Filtering out products or recipes listing <b>${esc(allExclusions.join(', '))}</b> (and skipping Open Food Facts records missing ingredient lists).</div>` : ''}
@@ -1488,12 +1536,12 @@ V.healthy = () => {
       <div><label for="hBudget">Budget</label><select id="hBudget" onchange="runHealthy()"><option value="all">Any budget</option><option value="budget">Budget-friendly (home / entered)</option><option value="moderate">Moderate (home / entered)</option><option value="price-entered">Packaged with entered ₹ price</option></select></div>
     </div>
     <div class="row" style="margin-top:.2rem">
-      <div><label for="hQ">Search ingredient or snack keyword (optional)</label><input id="hQ" placeholder="e.g. makhana, ragi, oats, dates" value="${esc(HF.q)}" onkeydown="if(event.key==='Enter')runHealthy()"></div>
+      <div><label for="hQ">Search ingredient or snack keyword (optional)</label><input id="hQ" placeholder="e.g. makhana, ragi, oats, almonds, dates" value="${esc(HF.q)}" onkeydown="if(event.key==='Enter')runHealthy()"></div>
       <div><label for="hAvoid">Extra ingredients to avoid or check (comma separated)</label><input id="hAvoid" placeholder="e.g. palm oil, peanut, maida" value="${esc(HF.avoid)}" oninput="runHealthy()"></div>
       <div style="flex:0 0 auto;display:flex;gap:.45rem"><button type="button" class="btn" onclick="runHealthy()">Update results</button><button type="button" class="btn l" onclick="resetHealthy()">Reset</button></div>
     </div>
   </div>
-  <div id="healthyOut" style="margin-top:1.1rem"></div>`;
+  <div id="healthyOut" style="margin-top:1.15rem"></div>`;
 };
 
 window.setHealthyCat = k => {
@@ -1551,9 +1599,19 @@ window.runHealthy = async () => {
   const excl = [...new Set([...allExclusions, ...extraAvoid])];
   const reqId = ++_healthyReqSeq;
 
+  const matchRecipeCat = r => {
+    if (HF.cat === 'all') return true;
+    if ((r.focus || []).includes(HF.cat)) return true;
+    const hayR = [r.n, r.cat, r.swapFor || '', ...(r.ing || [])].join(' ').toLowerCase();
+    if (HF.cat === 'whole-grain') return (r.focus || []).includes('millet') || /whole|oat|atta|quinoa|poha|dalia|brown rice/.test(hayR);
+    if (HF.cat === 'nuts-seeds') return /almond|walnut|cashew|seed|peanut|pistachio|makhana/.test(hayR);
+    if (HF.cat === 'biscuits-crackers') return /cookie|biscuit|cracker|khakhra|mathri/.test(hayR);
+    return false;
+  };
+
   const wantHome = HF.src !== 'packaged' && HF.prep !== 'none' && HF.budget !== 'price-entered';
   const recMatches = wantHome ? getRecipes().filter(r => {
-    if (HF.cat !== 'all' && !(r.focus || []).includes(HF.cat)) return false;
+    if (!matchRecipeCat(r)) return false;
     if (HF.taste !== 'all' && r.t !== HF.taste) return false;
     if (HF.diet !== 'all' && !(r.diet || []).includes(HF.diet)) return false;
     if (HF.prep === 'quick' && r.prepMin > 10) return false;
@@ -1583,7 +1641,7 @@ window.runHealthy = async () => {
     return;
   }
 
-  out.innerHTML = `<div class="split-head"><h3>Packaged Products (Open Food Facts)</h3><span class="mut" style="font-size:.86rem">Checking listed nutrition values…</span></div><div class="loading-box"><span class="spinner" aria-hidden="true"></span><span>Fetching Open Food Facts products with nutrition checks…</span></div>${homeSection}`;
+  out.innerHTML = `<div class="split-head"><h3>Packaged Products (Open Food Facts)</h3><span class="mut" style="font-size:.86rem">Checking listed nutrition values…</span></div><div class="loading-box"><span class="spinner" aria-hidden="true"></span><span>Fetching verified Open Food Facts products with nutrition checks…</span></div>${homeSection}`;
 
   try {
     const url = `/api/off/healthy?cat=${encodeURIComponent(HF.cat)}&taste=${encodeURIComponent(HF.taste)}&q=${encodeURIComponent(HF.q)}&exclude=${encodeURIComponent(excl.join(','))}`;
@@ -1613,7 +1671,7 @@ window.runHealthy = async () => {
     }
     packItems.forEach(it => { window._healthyPackMap[it.code] = it; });
 
-    const packHTML = `<div class="split-head"><h3>Packaged Products (${packItems.length} shown · Open Food Facts)</h3><span class="mut" style="font-size:.84rem">${HF.budget === 'budget' || HF.budget === 'moderate' ? 'Retail prices are not listed in Open Food Facts (enter ₹ price in Compare).' : 'No unsupported health scores assigned.'}</span></div>
+    const packHTML = `<div class="split-head"><h3>Packaged Products (<span class="num">${packItems.length}</span> shown · Open Food Facts)</h3><span class="mut" style="font-size:.84rem">${HF.budget === 'budget' || HF.budget === 'moderate' ? 'Retail prices are not listed in Open Food Facts (enter ₹ price in Compare).' : 'No unsupported health scores assigned.'}</span></div>
     ${(data.excludedCount || data.unverifiedNutritionSkipped) ? `<p class="mut" style="margin:.2rem 0 .7rem;font-size:.86rem">${data.excludedCount ? `<b>${data.excludedCount}</b> item(s) matching avoided ingredients/allergens were excluded. ` : ''}${data.unverifiedNutritionSkipped ? `<b>${data.unverifiedNutritionSkipped}</b> item(s) missing required nutrition/ingredient fields were skipped rather than assumed safe or healthy.` : ''}</p>` : ''}
     ${packItems.length ? `<div class="grid">${packItems.map(it => {
       const nu = it.nutriments || {};
@@ -1627,10 +1685,11 @@ window.runHealthy = async () => {
       return `<article class="card alt-card">
         <div>
           ${prodImgHTML(it, 'sm')}
+          <span class="kicker-text" style="margin-bottom:.25rem">${esc(it.snackCategory || 'Packaged snack')}</span>
           <div class="meta-line" style="margin-bottom:.25rem"><span>${esc(it.brand || 'Brand unlisted')}</span>${it.qty ? `<span>· ${esc(it.qty)}</span>` : ''}</div>
-          <h4 style="margin-bottom:.3rem">${esc(it.name)}</h4>
-          ${facts.length ? `<div class="meta-line num" style="margin-bottom:.4rem">${facts.join(' · ')} / 100g</div>` : `<div class="meta-line" style="margin-bottom:.4rem">Partial nutrition listed</div>`}
-          ${it.ing ? `<p class="mut" style="font-size:.82rem;margin:.25rem 0"><b>Ingredients:</b> ${esc(it.ing.slice(0, 120))}${it.ing.length > 120 ? '…' : ''}</p>` : `<p class="mut" style="font-size:.82rem;margin:.25rem 0"><b>Ingredients:</b> Not listed in Open Food Facts.</p>`}
+          <h4 style="margin-bottom:.32rem">${esc(it.name)}</h4>
+          ${facts.length ? `<div class="meta-line num" style="margin-bottom:.42rem">${facts.join(' · ')} / 100g</div>` : `<div class="meta-line" style="margin-bottom:.42rem">Partial nutrition listed</div>`}
+          ${it.ing ? `<p class="mut" style="font-size:.82rem;margin:.25rem 0"><b>Ingredients:</b> ${esc(it.ing.slice(0, 115))}${it.ing.length > 115 ? '…' : ''}</p>` : `<p class="mut" style="font-size:.82rem;margin:.25rem 0"><b>Ingredients:</b> Not listed in Open Food Facts.</p>`}
           ${(it.reasons || []).length ? `<ul class="alt-reasons">${it.reasons.map(rs => `<li><b>Listed:</b> ${esc(rs)}</li>`).join('')}</ul>` : ''}
           ${(it.buzzwords || []).length ? `<div class="buzz-warn"><b>Marketing Claim vs Label:</b> Label uses “${esc(it.buzzwords.join(', '))}”. Marketing words alone do not make a snack healthy—always check listed sugars, salt and oils.</div>` : ''}
         </div>
